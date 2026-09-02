@@ -5,3 +5,6 @@
 *.ots
 Gemfile.lock
 .DS_Store
+
+# but the interop fixtures must be tracked (tests need them; they don't ship in the gem)
+!test/vectors/*.ots
