@@ -5,7 +5,7 @@ require "uri"
 
 module OpenTimestamps
   # HTTP client for an OpenTimestamps calendar server. The client never
-  # broadcasts a Bitcoin transaction itself — the calendar aggregates many
+  # broadcasts a Bitcoin transaction itself - the calendar aggregates many
   # digests into a single transaction. We only submit and later upgrade.
   class Calendar
     MIME = "application/vnd.opentimestamps.v1"

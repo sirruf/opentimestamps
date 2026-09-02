@@ -9,23 +9,27 @@ Gem::Specification.new do |spec|
   spec.description = <<~DESC
     A dependency-free Ruby implementation of the OpenTimestamps protocol: stamp a
     hash against the Bitcoin blockchain via public calendar servers, upgrade the
-    proof to a block attestation, and verify it — using only the standard library.
+    proof to a block attestation, and verify it - using only the standard library.
     Proofs are self-verifying and outlive both this gem and any single server.
   DESC
 
   spec.authors  = ["Artem Kolesnikov"]
-  spec.email    = ["you@example.com"] # TODO: set contact email before publishing
-  spec.homepage = "https://github.com/OWNER/opentimestamps-ruby" # TODO
+  spec.email    = ["sirruf@me.com"]
+  spec.homepage = "https://github.com/sirruf/opentimestamps"
   spec.license  = "MIT"
 
   spec.required_ruby_version = ">= 3.0"
 
-  spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE"]
+  spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE", "CHANGELOG.md"]
   spec.require_paths = ["lib"]
 
-  # No runtime dependencies — stdlib only (digest, openssl, net/http, json).
+  # No runtime dependencies - stdlib only (digest, openssl, net/http, json).
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"
 
+  spec.metadata["homepage_uri"]      = spec.homepage
+  spec.metadata["source_code_uri"]   = "https://github.com/sirruf/opentimestamps"
+  spec.metadata["changelog_uri"]     = "https://github.com/sirruf/opentimestamps/blob/main/CHANGELOG.md"
+  spec.metadata["bug_tracker_uri"]   = "https://github.com/sirruf/opentimestamps/issues"
   spec.metadata["rubygems_mfa_required"] = "true"
 end

@@ -2,11 +2,11 @@
 
 A **pure-Ruby, zero-dependency** client for [OpenTimestamps](https://opentimestamps.org):
 stamp a hash against the Bitcoin blockchain via public calendar servers, upgrade
-the proof to a block attestation, and verify it — using only the standard library
+the proof to a block attestation, and verify it - using only the standard library
 (`digest`, `openssl`, `net/http`, `json`). Proofs are self-verifying and outlive
 both this gem and any single server.
 
-> Status: **v0.1** — read/write path, verification, calendar client, and `.ots`
+> Status: **v0.1** - read/write path, verification, calendar client, and `.ots`
 > (de)serialization are implemented and tested, including **byte-exact interop
 > against 12 reference `.ots` vectors** (the Bitcoin whitepaper timestamp among
 > them) and a real-block verification. See _Roadmap_ for what's next.
@@ -29,18 +29,18 @@ gem "opentimestamps"
 ```ruby
 require "opentimestamps"
 
-# 1. Stamp — submits a SHA-256 to a public calendar; returns a *pending* proof.
+# 1. Stamp - submits a SHA-256 to a public calendar; returns a *pending* proof.
 ots = OpenTimestamps.stamp("hello world\n")
 
-# 2. PERSIST — the calendar indexes by a per-request commitment. Keep only the
+# 2. PERSIST - the calendar indexes by a per-request commitment. Keep only the
 #    hash and you can never upgrade. Always save the .ots.
 File.binwrite("hello.txt.ots", ots.serialize)
 
-# 3. Upgrade — hours later, fold in the Bitcoin path the calendar has anchored.
+# 3. Upgrade - hours later, fold in the Bitcoin path the calendar has anchored.
 ots = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread("hello.txt.ots"))
 OpenTimestamps.upgrade(ots) && File.binwrite("hello.txt.ots", ots.serialize)
 
-# 4. Verify — recompute the commitment and check it against the block merkle root.
+# 4. Verify - recompute the commitment and check it against the block merkle root.
 OpenTimestamps.verify(ots)
 # => [{ height: 913442, time: 2026-09-01 15:58:00 UTC, verified: true }]
 ```
@@ -61,7 +61,7 @@ OpenTimestamps.verify(ots)
 
 - [x] Byte-exact interop against reference `.ots` vectors (`test/vectors/`, incl.
       Bitcoin/Litecoin/Ethereum, unknown notaries, merkle trees).
-- [x] Keccak-256 (Ethereum branch) — pure Ruby, known-answer tested.
+- [x] Keccak-256 (Ethereum branch) - pure Ruby, known-answer tested.
 - [x] Real-block verification (deterministic, offline).
 - [ ] Multi-calendar submit/upgrade with quorum.
 - [ ] `Chain::BitcoinCore` JSON-RPC adapter (trustless verification via own node).

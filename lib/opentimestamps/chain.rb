@@ -8,7 +8,7 @@ require "time"
 module OpenTimestamps
   # Chain oracles resolve a block height to its merkle root (in internal byte
   # order, matching what OTS operations produce) and its time. Verification
-  # depends only on this interface, never on a specific provider — inject your
+  # depends only on this interface, never on a specific provider - inject your
   # own Bitcoin node for a fully trustless check.
   module Chain
     # Public block explorer (Esplora API). Convenient, but trusts the explorer.
@@ -40,7 +40,7 @@ module OpenTimestamps
       end
     end
 
-    # TODO: BitcoinCore — a JSON-RPC adapter (getblockhash + getblockheader)
+    # TODO: BitcoinCore - a JSON-RPC adapter (getblockhash + getblockheader)
     # for verification against your own node with no third party trusted.
     # Same interface: #block_merkle_root_and_time(height) -> [root_internal, Time].
   end

@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 module OpenTimestamps
-  # Pure-Ruby Keccak-256 (Ethereum's original Keccak, 0x01 padding — NOT NIST
+  # Pure-Ruby Keccak-256 (Ethereum's original Keccak, 0x01 padding - NOT NIST
   # SHA3-256, which uses 0x06). Needed only to parse OTS proofs that also anchor
   # to Ethereum; Bitcoin proofs never use it. Verified against known-answer
   # vectors in the test suite. OpenSSL does not ship original Keccak.
   module Keccak256
     MASK = (1 << 64) - 1
-    RATE = 136 # bytes (1088-bit rate, 512-bit capacity → 256-bit output)
+    RATE = 136 # bytes (1088-bit rate, 512-bit capacity -> 256-bit output)
 
     RNDC = [0x0000000000000001, 0x0000000000008082, 0x800000000000808a, 0x8000000080008000,
             0x000000000000808b, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,

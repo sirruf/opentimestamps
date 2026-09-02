@@ -14,7 +14,7 @@ require_relative "opentimestamps/chain"
 
 # A pure-Ruby (zero runtime dependencies) client for OpenTimestamps: stamp a
 # hash against Bitcoin via public calendars, upgrade to a block attestation,
-# and verify — with proofs that outlive this library or any server.
+# and verify - with proofs that outlive this library or any server.
 #
 #   ots = OpenTimestamps.stamp("hello world\n")   # => DetachedTimestampFile (pending)
 #   File.binwrite("hello.txt.ots", ots.serialize) # persist! (or you cannot upgrade)
@@ -33,7 +33,7 @@ module OpenTimestamps
     stamp_digest(digest_for(data, hash), calendar: calendar, hash: hash)
   end
 
-  # Stamp an already-computed digest — the content itself never leaves the
+  # Stamp an already-computed digest - the content itself never leaves the
   # caller (privacy / "sealed" mode). `hash` names the algorithm that produced
   # it, so verification knows the digest length.
   def stamp_digest(digest, calendar: DEFAULT_CALENDARS.first, hash: :sha256)
@@ -71,7 +71,7 @@ module OpenTimestamps
   def info(detached)
     lines = ["file digest (#{detached.file_hash_op.kind}): #{detached.file_digest.unpack1('H*')}"]
     detached.timestamp.each_attestation do |commitment, att|
-      lines << "  #{att} @ #{commitment.unpack1('H*')[0, 32]}…"
+      lines << "  #{att} @ #{commitment.unpack1('H*')[0, 32]}..."
     end
     lines.join("\n")
   end

@@ -7,8 +7,8 @@ module OpenTimestamps
     PENDING_TAG = "\x83\xDF\xE3\x0D\x2E\xF9\x0C\x8E".b
     BITCOIN_TAG = "\x05\x88\x96\x0D\x73\xD7\x19\x01".b
 
-    # tag (8 bytes) + varbytes(payload). The length prefix lets us skip — and
-    # re-emit — attestation types we do not understand.
+    # tag (8 bytes) + varbytes(payload). The length prefix lets us skip - and
+    # re-emit - attestation types we do not understand.
     def self.deserialize(reader)
       tag = reader.read(8)
       payload = reader.varbytes

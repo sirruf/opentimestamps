@@ -39,7 +39,7 @@ class InteropTest < Minitest::Test
 
   # hello-world.txt.ots attests to Bitcoin block 358391. Our operation engine
   # must walk the reference merkle path to *exactly* that block's real merkle
-  # root — checked here against the historical value (deterministic, offline).
+  # root - checked here against the historical value (deterministic, offline).
   BLOCK_358391_ROOT =
     ["007ee445d23ad061af4a36b809501fab1ac4f2d7e7a739817dd0cbb7ec661b8a"].pack("H*").freeze
   BLOCK_358391_TIME = Time.at(1_432_827_678).utc
