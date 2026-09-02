@@ -28,10 +28,19 @@ module OpenTimestamps
 
   module_function
 
-  # Stamp raw data (or pass a precomputed digest with hash: nil in a later rev).
+  # Stamp raw data: hashes it, then stamps the digest.
   def stamp(data, calendar: DEFAULT_CALENDARS.first, hash: :sha256)
-    digest = digest_for(data, hash)
-    timestamp = Calendar.new(calendar).submit(digest)
+    stamp_digest(digest_for(data, hash), calendar: calendar, hash: hash)
+  end
+
+  # Stamp an already-computed digest — the content itself never leaves the
+  # caller (privacy / "sealed" mode). `hash` names the algorithm that produced
+  # it, so verification knows the digest length.
+  def stamp_digest(digest, calendar: DEFAULT_CALENDARS.first, hash: :sha256)
+    len = DetachedTimestampFile::HASH_OPS.fetch(hash) { raise Error, "unsupported hash #{hash.inspect}" }
+    raise Error, "digest must be #{len} bytes for #{hash}, got #{digest.bytesize}" unless digest.bytesize == len
+
+    timestamp = Calendar.new(calendar).submit(digest.b)
     DetachedTimestampFile.new(Op.new(hash), timestamp)
   end
 
