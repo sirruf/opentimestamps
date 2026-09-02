@@ -49,6 +49,37 @@ class TimestampTest < Minitest::Test
     refute ts.verify(bad).first[:verified]
   end
 
+  def test_find_locates_a_node_by_commitment
+    _leaf, ts, commitment = build
+    node = ts.find(commitment)
+    refute_nil node
+    assert_equal commitment, node.msg
+    assert_nil ts.find("nonexistent")
+  end
+
+  def test_merge_folds_a_bitcoin_path_into_a_pending_one
+    leaf = Digest::SHA256.digest("leaf")
+    op = Op.new(:sha256)
+    commitment = op.apply(leaf)
+
+    pending = Timestamp.new(leaf)
+    pending.ops[op] = Timestamp.new(commitment).tap { |n| n.attestations << Attestation::Pending.new("https://cal") }
+
+    anchored = Timestamp.new(leaf)
+    anchored.ops[Op.new(:sha256)] = Timestamp.new(commitment).tap { |n| n.attestations << Attestation::Bitcoin.new(42) }
+
+    pending.merge(anchored)
+    kinds = pending.each_attestation.map { |_, a| a.class }
+    assert_includes kinds, Attestation::Pending
+    assert_includes kinds, Attestation::Bitcoin
+  end
+
+  def test_merge_rejects_mismatched_root
+    assert_raises(OpenTimestamps::Error) do
+      Timestamp.new("a" * 32).merge(Timestamp.new("b" * 32))
+    end
+  end
+
   def test_unknown_attestation_preserved_on_roundtrip
     leaf = Digest::SHA256.digest("x")
     ts = Timestamp.new(leaf)

@@ -18,6 +18,8 @@ module OpenTimestamps
     def initialize(kind, arg = nil)
       raise Error, "unknown op #{kind}" unless TAG.key?(kind)
       raise Error, "#{kind} takes no argument" if arg && UNARY.value?(kind)
+      raise Error, "#{kind} requires an argument" if arg.nil? && BINARY.value?(kind)
+
       @kind = kind
       @arg = arg&.b
     end

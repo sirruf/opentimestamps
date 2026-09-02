@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
 module OpenTimestamps
-  # Low-level wire primitives shared by every OTS structure: base-128 varuint,
-  # length-prefixed varbytes, and the detached-file magic header.
+  # Wire primitives shared by every OTS structure: the base-128 varuint,
+  # length-prefixed varbytes, and the detached-file magic header. The reader
+  # treats its input as untrusted and only ever raises DeserializationError.
   module Serialization
-    # \x00 "OpenTimestamps" \x00\x00 "Proof" \x00 + 8-byte magic
     MAGIC = "\x00OpenTimestamps\x00\x00Proof\x00\xBF\x89\xE2\xE8\x84\xE8\x92\x94".b
 
-    # Sequential byte reader over a binary string.
+    # Upper bound on any decoded varuint. Real lengths (bounded by a file) and
+    # block heights fit comfortably; the cap stops a crafted length prefix from
+    # producing a bignum that would blow up byteslice.
+    MAX_VARUINT = (1 << 32) - 1
+
     class Reader
       def initialize(bytes)
         @b = bytes.b
@@ -19,26 +23,29 @@ module OpenTimestamps
       def rest = @b.byteslice(@i..) || "".b
 
       def u8
-        byte = @b.getbyte(@i) or raise DeserializationError, "unexpected EOF"
+        byte = @b.getbyte(@i) or raise DeserializationError, "unexpected end of input"
         @i += 1
         byte
       end
 
       def read(n)
+        raise DeserializationError, "want #{n} bytes, #{@b.bytesize - @i} left" if n > @b.bytesize - @i
+
         s = @b.byteslice(@i, n)
-        raise DeserializationError, "unexpected EOF (wanted #{n})" if s.nil? || s.bytesize < n
         @i += n
         s
       end
 
-      # Base-128 little-endian varuint (MSB = continuation).
       def varuint
         result = 0
         shift = 0
         loop do
           byte = u8
           result |= (byte & 0x7f) << shift
+          raise DeserializationError, "varuint out of range" if result > MAX_VARUINT
+
           break if (byte & 0x80).zero?
+
           shift += 7
         end
         result
@@ -47,29 +54,31 @@ module OpenTimestamps
       def varbytes = read(varuint)
     end
 
-    # Sequential byte writer producing a binary string.
     class Writer
-      def initialize = @s = +"".b
+      def initialize
+        @string = +"".b
+      end
 
-      def string = @s
+      attr_reader :string
 
       def u8(int)
-        @s << int
+        @string << int
         self
       end
 
       def write(bytes)
-        @s << bytes.b
+        @string << bytes.b
         self
       end
 
       def varuint(n)
         raise Error, "varuint must be non-negative" if n.negative?
+
         loop do
           byte = n & 0x7f
           n >>= 7
           byte |= 0x80 if n.positive?
-          @s << byte
+          @string << byte
           break if n.zero?
         end
         self

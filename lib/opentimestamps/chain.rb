@@ -6,13 +6,15 @@ require "json"
 require "time"
 
 module OpenTimestamps
-  # Chain oracles resolve a block height to its merkle root (in internal byte
+  # A chain oracle resolves a block height to its merkle root (in internal byte
   # order, matching what OTS operations produce) and its time. Verification
-  # depends only on this interface, never on a specific provider - inject your
-  # own Bitcoin node for a fully trustless check.
+  # depends only on this interface, so a Bitcoin node can be dropped in for a
+  # fully trustless check.
   module Chain
     # Public block explorer (Esplora API). Convenient, but trusts the explorer.
     class Explorer
+      MAX_RESPONSE_BYTES = 1 << 20
+
       def initialize(base = "https://blockstream.info/api", timeout: 20)
         @base = base.chomp("/")
         @timeout = timeout
@@ -23,6 +25,8 @@ module OpenTimestamps
         blk = JSON.parse(get("#{@base}/block/#{hash}"))
         root_internal = [blk.fetch("merkle_root")].pack("H*").reverse # display -> internal
         [root_internal, Time.at(blk.fetch("timestamp")).utc]
+      rescue JSON::ParserError, KeyError => e
+        raise NetworkError, "explorer returned unexpected data: #{e.class}"
       end
 
       private
@@ -33,15 +37,27 @@ module OpenTimestamps
         http.use_ssl = (uri.scheme == "https")
         http.open_timeout = @timeout
         http.read_timeout = @timeout
-        res = http.get(uri)
-        raise Error, "explorer: HTTP #{res.code}" unless res.code == "200"
 
-        res.body
+        http.start do |conn|
+          conn.request(Net::HTTP::Get.new(uri)) do |res|
+            raise NetworkError, "explorer: HTTP #{res.code}" unless res.code == "200"
+
+            return read_capped(res)
+          end
+        end
+      rescue SocketError, SystemCallError, Net::OpenTimeout, Net::ReadTimeout,
+             OpenSSL::SSL::SSLError, IOError => e
+        raise NetworkError, "explorer: #{e.class}: #{e.message}"
+      end
+
+      def read_capped(res)
+        buffer = +"".b
+        res.read_body do |chunk|
+          buffer << chunk
+          raise NetworkError, "explorer: response exceeds #{MAX_RESPONSE_BYTES} bytes" if buffer.bytesize > MAX_RESPONSE_BYTES
+        end
+        buffer
       end
     end
-
-    # TODO: BitcoinCore - a JSON-RPC adapter (getblockhash + getblockheader)
-    # for verification against your own node with no third party trusted.
-    # Same interface: #block_merkle_root_and_time(height) -> [root_internal, Time].
   end
 end

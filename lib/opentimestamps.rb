@@ -12,59 +12,85 @@ require_relative "opentimestamps/detached_file"
 require_relative "opentimestamps/calendar"
 require_relative "opentimestamps/chain"
 
-# A pure-Ruby (zero runtime dependencies) client for OpenTimestamps: stamp a
-# hash against Bitcoin via public calendars, upgrade to a block attestation,
-# and verify - with proofs that outlive this library or any server.
+# Client for the OpenTimestamps protocol, in pure Ruby with no runtime
+# dependencies.
 #
-#   ots = OpenTimestamps.stamp("hello world\n")   # => DetachedTimestampFile (pending)
-#   File.binwrite("hello.txt.ots", ots.serialize) # persist! (or you cannot upgrade)
-#   OpenTimestamps.upgrade(ots)                    # later: fold in the Bitcoin path
-#   OpenTimestamps.verify(ots)                     # => [{height:, time:, verified:}]
+#   ots = OpenTimestamps.stamp("hello world\n")   # DetachedTimestampFile (pending)
+#   File.binwrite("hello.txt.ots", ots.serialize) # persist, or you cannot upgrade
+#   OpenTimestamps.upgrade(ots)                    # hours later: fold in the Bitcoin path
+#   OpenTimestamps.verify(ots)                     # => [Verification(height:, time:, digest:)]
 module OpenTimestamps
   DEFAULT_CALENDARS = %w[
     https://alice.btc.calendar.opentimestamps.org
     https://bob.btc.calendar.opentimestamps.org
   ].freeze
 
+  # One confirmed Bitcoin attestation: the block that anchors +digest+, and when.
+  Verification = Struct.new(:height, :time, :digest, keyword_init: true)
+
   module_function
 
-  # Stamp raw data: hashes it, then stamps the digest.
-  def stamp(data, calendar: DEFAULT_CALENDARS.first, hash: :sha256)
-    stamp_digest(digest_for(data, hash), calendar: calendar, hash: hash)
+  # Stamp raw data: hash it, then stamp the digest.
+  def stamp(data, calendars: DEFAULT_CALENDARS, hash: :sha256, timeout: 20)
+    stamp_digest(digest_for(data, hash), calendars: calendars, hash: hash, timeout: timeout)
   end
 
-  # Stamp an already-computed digest - the content itself never leaves the
-  # caller (privacy / "sealed" mode). `hash` names the algorithm that produced
-  # it, so verification knows the digest length.
-  def stamp_digest(digest, calendar: DEFAULT_CALENDARS.first, hash: :sha256)
-    len = DetachedTimestampFile::HASH_OPS.fetch(hash) { raise Error, "unsupported hash #{hash.inspect}" }
-    raise Error, "digest must be #{len} bytes for #{hash}, got #{digest.bytesize}" unless digest.bytesize == len
+  # Stamp an already-computed digest. The content itself never leaves the caller
+  # (privacy / "sealed" mode). The digest is submitted to every calendar and the
+  # replies are merged, so a single calendar being down is not fatal.
+  def stamp_digest(digest, calendars: DEFAULT_CALENDARS, hash: :sha256, timeout: 20)
+    DetachedTimestampFile.from_hash(digest, hash: hash) # validate digest length before any network
 
-    timestamp = Calendar.new(calendar).submit(digest.b)
-    DetachedTimestampFile.new(Op.new(hash), timestamp)
+    merged = nil
+    failures = []
+    Array(calendars).each do |url|
+      timestamp = Calendar.new(url).submit(digest, timeout: timeout)
+      merged ? merged.merge(timestamp) : merged = timestamp
+    rescue NetworkError => e
+      failures << e.message
+    end
+    raise NetworkError, "every calendar failed: #{failures.join('; ')}" if merged.nil?
+
+    DetachedTimestampFile.new(Op.new(hash), merged)
   end
 
-  # Try to upgrade every pending attestation to its Bitcoin path.
-  # Returns true if anything changed. Persist the file afterwards.
+  # Ask each pending calendar to upgrade to its Bitcoin path, folding the result
+  # in. Returns true if anything changed; persist the file afterwards. A calendar
+  # that is unreachable is skipped, not fatal.
   def upgrade(detached, timeout: 20)
+    return false if detached.timestamp.each_attestation.any? { |_, att| att.bitcoin? }
+
     changed = false
-    pendings = detached.timestamp.each_attestation.select { |_, a| a.pending? }
-    pendings.each do |commitment, att|
-      upgraded = Calendar.new(att.uri).upgrade(commitment, timeout: timeout)
+    detached.timestamp.each_attestation.select { |_, att| att.pending? }.each do |commitment, att|
+      upgraded = begin
+        Calendar.new(att.uri).upgrade(commitment, timeout: timeout)
+      rescue NetworkError
+        nil
+      end
       next unless upgraded
 
-      node = detached.timestamp.find(commitment)
-      node&.merge(upgraded)
+      detached.timestamp.find(commitment)&.merge(upgraded)
       changed = true
     end
     changed
   end
 
+  # Verify against the chain, failing closed: raises VerificationError unless at
+  # least one Bitcoin attestation matches its block. Returns the confirmed
+  # attestations, each carrying the proven digest to compare with your document.
   def verify(detached, chain: Chain::Explorer.new)
-    results = detached.timestamp.verify(chain)
-    raise VerificationError, "no Bitcoin attestation (still pending?)" if results.empty?
+    digest = detached.file_digest
+    confirmed = detached.timestamp.verify(chain).select { |result| result[:verified] }
+    raise VerificationError, "not anchored in Bitcoin (still pending, or the proof does not match)" if confirmed.empty?
 
-    results
+    confirmed.map { |result| Verification.new(height: result[:height], time: result[:time], digest: digest) }
+  end
+
+  # Boolean form of verify that never raises.
+  def verified?(detached, chain: Chain::Explorer.new)
+    !verify(detached, chain: chain).empty?
+  rescue VerificationError
+    false
   end
 
   # Human-readable dump of a proof's structure.
@@ -80,7 +106,8 @@ module OpenTimestamps
     case hash
     when :sha256 then Digest::SHA256.digest(data)
     when :sha1   then Digest::SHA1.digest(data)
-    else raise Error, "unsupported hash #{hash.inspect}"
+    else raise Error, "cannot hash raw data with #{hash.inspect}; pass a precomputed digest to stamp_digest"
     end
   end
+  private_class_method :digest_for
 end
