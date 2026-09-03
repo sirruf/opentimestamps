@@ -46,6 +46,7 @@ module OpenTimestamps
 
       def pending? = true
       def components = [@uri]
+      def sort_key = [PENDING_TAG, @uri.b]
       def to_s = "PENDING #{@uri}"
 
       def serialize(writer)
@@ -64,6 +65,7 @@ module OpenTimestamps
 
       def bitcoin? = true
       def components = [@height]
+      def sort_key = [BITCOIN_TAG, @height]
       def to_s = "BITCOIN block ##{@height}"
 
       def serialize(writer)
@@ -83,6 +85,7 @@ module OpenTimestamps
       end
 
       def components = [@tag, @payload]
+      def sort_key = [@tag, @payload]
       def to_s = "UNKNOWN(#{@tag.unpack1('H*')})"
 
       def serialize(writer)

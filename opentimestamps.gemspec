@@ -20,8 +20,10 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = ">= 3.0"
 
-  spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE", "CHANGELOG.md"]
+  spec.files = Dir["lib/**/*.rb", "exe/*", "README.md", "LICENSE", "CHANGELOG.md"]
   spec.require_paths = ["lib"]
+  spec.bindir = "exe"
+  spec.executables = ["ots"]
 
   # No runtime dependencies - stdlib only (digest, openssl, net/http, json).
   spec.add_development_dependency "minitest", "~> 5.0"

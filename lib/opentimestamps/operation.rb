@@ -18,13 +18,20 @@ module OpenTimestamps
     def initialize(kind, arg = nil)
       raise Error, "unknown op #{kind}" unless TAG.key?(kind)
       raise Error, "#{kind} takes no argument" if arg && UNARY.value?(kind)
-      raise Error, "#{kind} requires an argument" if arg.nil? && BINARY.value?(kind)
+      # A binary op must carry a non-empty operand: the reference requires
+      # min_len 1, and an empty operand would be an identity step that could pad a
+      # proof with extra tree paths to the same commitment.
+      raise Error, "#{kind} requires a non-empty argument" if BINARY.value?(kind) && (arg.nil? || arg.empty?)
 
       @kind = kind
       @arg = arg&.b
     end
 
     def binary? = BINARY.value?(@kind)
+
+    # Canonical sort key matching the reference client: order by tag, then by the
+    # raw operand bytes (empty for a unary op).
+    def sort_key = [TAG.fetch(@kind), @arg || "".b]
 
     # Apply the operation to a message, returning the new bytes.
     def apply(msg)
@@ -50,7 +57,10 @@ module OpenTimestamps
 
     def self.deserialize(reader, tag)
       if BINARY.key?(tag)
-        new(BINARY[tag], reader.varbytes)
+        arg = reader.varbytes
+        raise DeserializationError, "#{BINARY[tag]} op with empty argument" if arg.empty?
+
+        new(BINARY[tag], arg)
       elsif UNARY.key?(tag)
         new(UNARY[tag])
       else

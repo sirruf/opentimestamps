@@ -43,7 +43,7 @@ class TimestampTest < Minitest::Test
     t = Time.utc(2020, 1, 1)
 
     good = FakeChain.new(555 => [commitment, t])
-    assert_equal [{ height: 555, time: t, verified: true }], ts.verify(good)
+    assert_equal [{ height: 555, time: t, verified: true, commitment: commitment }], ts.verify(good)
 
     bad = FakeChain.new(555 => ["\x00" * 32, t])
     refute ts.verify(bad).first[:verified]
