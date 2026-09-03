@@ -43,10 +43,29 @@ class TimestampTest < Minitest::Test
     t = Time.utc(2020, 1, 1)
 
     good = FakeChain.new(555 => [commitment, t])
-    assert_equal [{ height: 555, time: t, verified: true, commitment: commitment }], ts.verify(good)
+    assert_equal [{ height: 555, time: t, verified: true, commitment: commitment, error: nil }], ts.verify(good)
 
     bad = FakeChain.new(555 => ["\x00" * 32, t])
     refute ts.verify(bad).first[:verified]
+  end
+
+  def test_verify_records_network_error_per_attestation
+    _leaf, ts, = build
+    down = Object.new
+    def down.block_merkle_root_and_time(_height) = raise(OpenTimestamps::NetworkError, "down")
+    result = ts.verify(down).first
+    refute result[:verified]
+    assert_nil result[:time]
+    assert_instance_of OpenTimestamps::NetworkError, result[:error]
+  end
+
+  def test_verify_records_no_error_for_missing_block
+    _leaf, ts, = build
+    missing = Object.new
+    def missing.block_merkle_root_and_time(_height) = raise(OpenTimestamps::BlockNotFound, "nope")
+    result = ts.verify(missing).first
+    refute result[:verified]
+    assert_nil result[:error]
   end
 
   def test_find_locates_a_node_by_commitment

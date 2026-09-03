@@ -54,4 +54,28 @@ class ApiTest < Minitest::Test
   def test_info_dump_names_the_block
     assert_match(/BITCOIN block #358391/, OpenTimestamps.info(hello_world))
   end
+
+  def test_digest_file_streams_same_result_as_in_memory_hash
+    require "tmpdir"
+    # Crosses the 64 KiB chunk boundary, and also covers an empty file.
+    [("hello world\n" * 10_000), ""].each do |data|
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "f.bin")
+        File.binwrite(path, data)
+        %i[sha256 sha1 ripemd160].each do |kind|
+          expected = begin
+            OpenTimestamps.digest_for_kind(data, kind)
+          rescue OpenTimestamps::Error
+            next # ripemd160 needs the OpenSSL legacy provider; skip if absent
+          end
+          assert_equal expected, OpenTimestamps.digest_file(path, kind),
+                       "#{kind} streamed digest must match the in-memory digest"
+        end
+      end
+    end
+  end
+
+  def test_digest_file_rejects_non_file_hash_op
+    assert_raises(OpenTimestamps::Error) { OpenTimestamps.digest_file("/dev/null", :keccak256) }
+  end
 end

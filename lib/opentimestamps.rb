@@ -97,14 +97,29 @@ module OpenTimestamps
     raise Error, "quorum must be a positive integer" unless quorum.is_a?(Integer) && quorum >= 1
 
     digest = detached.file_digest
-    confirmed = detached.timestamp.verify(chain)
-                        .select { |result| result[:verified] }
-                        .uniq { |result| [result[:height], result[:commitment]] }
-    heights = confirmed.map { |result| result[:height] }.uniq
-    if heights.size < quorum
-      raise VerificationError,
-            "not anchored in #{quorum} distinct Bitcoin block(s) " \
-            "(confirmed #{heights.size}; still pending, or the proof does not match)"
+    results = detached.timestamp.verify(chain)
+    confirmed = results.select { |result| result[:verified] }
+                       .uniq { |result| [result[:height], result[:commitment]] }
+    confirmed_heights = confirmed.map { |result| result[:height] }.uniq
+
+    if confirmed_heights.size < quorum
+      outage_heights = results.select { |result| result[:error] }.map { |result| result[:height] }.uniq
+      # The best case even if every unreachable block eventually confirmed. If that
+      # still falls short, the quorum is unreachable for this proof no matter the
+      # oracle, so it is a verification failure, not an outage.
+      if (confirmed_heights | outage_heights).size < quorum
+        raise VerificationError,
+              "not anchored in #{quorum} distinct Bitcoin block(s) " \
+              "(confirmed #{confirmed_heights.size}; still pending, or the proof does not match)"
+      end
+
+      # A reachable quorum is only blocked by the oracle being down for some blocks:
+      # a transient outage, carried with its cause so the real reason is not lost.
+      cause = results.filter_map { |result| result[:error] }.first
+      raise NetworkError,
+            "chain oracle unreachable for #{(outage_heights - confirmed_heights).size} block(s); " \
+            "confirmed #{confirmed_heights.size} of #{quorum} required (#{cause&.message})",
+            cause: cause
     end
 
     confirmed.map { |result| Verification.new(height: result[:height], time: result[:time], digest: digest) }
@@ -144,5 +159,28 @@ module OpenTimestamps
     raise Error, "#{kind.inspect} is not a valid file-hash op" unless DetachedTimestampFile::HASH_OPS.key?(kind)
 
     Op.new(kind).apply(data)
+  end
+
+  # Stream a file through a file-hash op, so a large file is never read whole into
+  # memory. Same result as digest_for_kind(File.binread(path), kind).
+  def digest_file(path, kind)
+    raise Error, "#{kind.inspect} is not a valid file-hash op" unless DetachedTimestampFile::HASH_OPS.key?(kind)
+
+    digest = case kind
+             when :sha256 then Digest::SHA256.new
+             when :sha1   then Digest::SHA1.new
+             when :ripemd160
+               begin
+                 OpenSSL::Digest.new("RIPEMD160")
+               rescue OpenSSL::Digest::DigestError => e
+                 raise Error, "ripemd160 unavailable (enable the OpenSSL legacy provider): #{e.message}"
+               end
+             end
+    File.open(path, "rb") do |file|
+      while (chunk = file.read(64 * 1024))
+        digest.update(chunk)
+      end
+    end
+    digest.digest
   end
 end

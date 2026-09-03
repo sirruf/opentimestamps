@@ -4,6 +4,7 @@ require "net/http"
 require "uri"
 require "json"
 require "time"
+require "securerandom"
 
 module OpenTimestamps
   # A chain oracle resolves a block height to its merkle root (in internal byte
@@ -64,12 +65,15 @@ module OpenTimestamps
 
         http.start do |conn|
           conn.request(Net::HTTP::Get.new(uri)) do |res|
+            # A 404 means the block does not exist (height past the tip, or a bogus
+            # proof), which is a verification fact, not an outage.
+            raise BlockNotFound, "explorer: block not found (HTTP 404)" if res.code == "404"
             raise NetworkError, "explorer: HTTP #{res.code}" unless res.code == "200"
 
             return Chain.read_capped(res) { |n| "explorer: response exceeds #{n} bytes" }
           end
         end
-      rescue SocketError, SystemCallError, Net::OpenTimeout, Net::ReadTimeout,
+      rescue SocketError, SystemCallError, Timeout::Error, Net::ProtocolError,
              OpenSSL::SSL::SSLError, IOError => e
         raise NetworkError, "explorer: #{e.class}: #{e.message}"
       end
@@ -124,15 +128,29 @@ module OpenTimestamps
         str && URI::DEFAULT_PARSER.unescape(str)
       end
 
+      # RPC error codes that mean "this block does not exist" rather than a fault.
+      BLOCK_NOT_FOUND_CODES = [-8, -5].freeze # height out of range / block not found
+
       def rpc(method, params)
-        body = JSON.generate(jsonrpc: "1.0", id: "opentimestamps", method: method, params: params)
+        id = SecureRandom.hex(8)
+        body = JSON.generate(jsonrpc: "1.0", id: id, method: method, params: params)
         parsed = JSON.parse(post(body))
         raise NetworkError, "bitcoind returned a non-object JSON-RPC response" unless parsed.is_a?(Hash)
 
+        # Handle bitcoind's own error before the id check: a request-level error
+        # (parse error, bad params) comes back with "id": null, and we want its
+        # message, not an id-mismatch complaint.
         if (error = parsed["error"])
+          code = error.is_a?(Hash) ? error["code"] : nil
           message = error.is_a?(Hash) ? error["message"] : error
+          raise BlockNotFound, "bitcoind: #{message}" if BLOCK_NOT_FOUND_CODES.include?(code)
+
           raise NetworkError, "bitcoind error: #{message}"
         end
+
+        # A per-call random id echoed back mismatching means the response was not
+        # for this call (a stale or mixed-up connection).
+        raise NetworkError, "bitcoind response id mismatch" if parsed.key?("id") && parsed["id"] != id
 
         parsed.fetch("result")
       rescue JSON::ParserError => e
@@ -162,7 +180,7 @@ module OpenTimestamps
             return Chain.read_capped(res) { |n| "bitcoind: response exceeds #{n} bytes" }
           end
         end
-      rescue SocketError, SystemCallError, Net::OpenTimeout, Net::ReadTimeout,
+      rescue SocketError, SystemCallError, Timeout::Error, Net::ProtocolError,
              OpenSSL::SSL::SSLError, IOError => e
         raise NetworkError, "bitcoind: #{e.class}: #{e.message}"
       end

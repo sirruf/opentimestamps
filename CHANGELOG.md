@@ -5,6 +5,39 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Added
+
+- `OpenTimestamps.digest_file` streams a file through a file-hash op, so the `ots`
+  CLI no longer reads a whole file into memory to stamp or verify it.
+
+### Changed
+
+- `verify` tolerates a chain oracle that is unreachable for some blocks: if the
+  reachable anchors already meet the quorum it succeeds; if a quorum is reachable
+  but blocked by the outage it raises `NetworkError` (carrying the underlying
+  cause) rather than `VerificationError`; and if the quorum is unreachable no
+  matter the oracle it still raises `VerificationError`. A transient outage is
+  never reported as a failed proof, and an impossible quorum is never reported as
+  an outage.
+- A chain oracle now signals a nonexistent block with the new `BlockNotFound`
+  (HTTP 404 for the explorer, RPC -8/-5 for a node), which `verify` treats as "not
+  anchored" (a `VerificationError`), not as an outage.
+- **Breaking for direct callers of `Timestamp#verify`:** each result now includes
+  an `error:` field, and `verified: false` can mean either a root mismatch or an
+  oracle that could not be reached (check `error`). The high-level `verify` /
+  `verified?` API is unchanged.
+
+### Hardened
+
+- `BitcoinCore` tags each JSON-RPC call with a unique id and rejects a response
+  that does not echo it (a stale or mixed-up connection), after surfacing any
+  bitcoind error first.
+- More transport failures (`Timeout::Error`, `Net::ProtocolError`) are wrapped as
+  `NetworkError` instead of escaping as a raw error.
+- The CLI rejects unexpected extra arguments and a non-positive `--timeout`.
+
 ## [0.2.0]
 
 ### Added
@@ -70,6 +103,7 @@ caps; only `DeserializationError` on malformed bytes). Tested with byte-exact
 round-trips of twelve reference vectors, an offline check against Bitcoin block
 358391, and Keccak-256 known-answer vectors.
 
-[Unreleased]: https://github.com/sirruf/opentimestamps/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sirruf/opentimestamps/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sirruf/opentimestamps/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sirruf/opentimestamps/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sirruf/opentimestamps/releases/tag/v0.1.0

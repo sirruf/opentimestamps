@@ -106,15 +106,25 @@ module OpenTimestamps
     end
 
     # Checks every Bitcoin attestation against the chain oracle. Returns one
-    # { height:, time:, verified:, commitment: } entry per Bitcoin attestation.
-    # The commitment lets a caller collapse several tree paths that prove the same
-    # anchor (same height and root) into one.
+    # { height:, time:, verified:, commitment:, error: } entry per Bitcoin
+    # attestation. The commitment lets a caller collapse several tree paths that
+    # prove the same anchor (same height and root) into one; +error+ is set when
+    # the oracle could not be reached for that block, so the caller can tell "not
+    # anchored" apart from "could not check".
     def verify(chain)
       each_attestation.filter_map do |commitment, att|
         next unless att.bitcoin?
 
-        root, time = chain.block_merkle_root_and_time(att.height)
-        { height: att.height, time: time, verified: commitment == root, commitment: commitment }
+        begin
+          root, time = chain.block_merkle_root_and_time(att.height)
+          { height: att.height, time: time, verified: commitment == root, commitment: commitment, error: nil }
+        rescue BlockNotFound
+          # The block does not exist: this attestation simply does not verify, the
+          # same as a root mismatch, so it carries no outage error.
+          { height: att.height, time: nil, verified: false, commitment: commitment, error: nil }
+        rescue NetworkError => e
+          { height: att.height, time: nil, verified: false, commitment: commitment, error: e }
+        end
       end
     end
   end

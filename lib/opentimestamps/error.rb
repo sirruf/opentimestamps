@@ -14,4 +14,10 @@ module OpenTimestamps
 
   # Raised when a calendar or chain oracle cannot be reached or answers badly.
   class NetworkError < Error; end
+
+  # Raised by a chain oracle when the block a proof references does not exist (a
+  # height past the chain tip, or a bogus attestation). This is a fact about the
+  # proof, not an outage, so verification treats it as "not anchored" rather than
+  # as an unreachable oracle.
+  class BlockNotFound < Error; end
 end

@@ -56,11 +56,14 @@ module OTSCLI
     end.parse!(argv)
 
     file = require_arg(argv, "stamp <file>")
+    no_extra(argv)
+    check_timeout(opts[:timeout])
     out = opts[:out] || "#{file}.ots"
 
     calendars = opts[:calendars].empty? ? OpenTimestamps::DEFAULT_CALENDARS : opts[:calendars]
-    data = File.binread(file)
-    detached = OpenTimestamps.stamp(data, calendars: calendars, timeout: opts[:timeout])
+    # Stream the file through the hash rather than reading it whole into memory.
+    digest = OpenTimestamps.digest_file(file, :sha256)
+    detached = OpenTimestamps.stamp_digest(digest, calendars: calendars, timeout: opts[:timeout])
     write_new(out, detached.serialize)
     warn "Stamped #{file} -> #{out} (pending; upgrade in an hour or so)"
   end
@@ -73,6 +76,8 @@ module OTSCLI
     end.parse!(argv)
 
     path = require_arg(argv, "upgrade <file.ots>")
+    no_extra(argv)
+    check_timeout(opts[:timeout])
     detached = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread(path))
     if OpenTimestamps.upgrade(detached, timeout: opts[:timeout])
       write_atomic(path, detached.serialize)
@@ -95,6 +100,7 @@ module OTSCLI
     end.parse!(argv)
 
     file = require_arg(argv, "verify <file>")
+    no_extra(argv)
     ots_path = opts[:ots] || "#{file}.ots"
     detached = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread(ots_path))
 
@@ -113,6 +119,7 @@ module OTSCLI
   def info(argv)
     OptionParser.new { |p| p.banner = "Usage: ots info <file.ots>" }.parse!(argv)
     path = require_arg(argv, "info <file.ots>")
+    no_extra(argv)
     detached = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread(path))
     puts OpenTimestamps.info(detached)
   end
@@ -132,8 +139,7 @@ module OTSCLI
   # Recompute the file's hash with the proof's file-hash op and compare it to the
   # digest the proof commits to; this is what binds a proof to a document.
   def bound_to_file?(detached, file)
-    recomputed = OpenTimestamps.digest_for_kind(File.binread(file), detached.file_hash_op.kind)
-    recomputed == detached.file_digest
+    OpenTimestamps.digest_file(file, detached.file_hash_op.kind) == detached.file_digest
   end
 
   def require_arg(argv, shape)
@@ -141,6 +147,21 @@ module OTSCLI
     return arg if arg
 
     warn "ots: missing argument\nUsage: ots #{shape}"
+    exit 1
+  end
+
+  # Reject leftover positional arguments rather than silently ignoring them.
+  def no_extra(argv)
+    return if argv.empty?
+
+    warn "ots: unexpected argument(s): #{argv.join(' ')}"
+    exit 1
+  end
+
+  def check_timeout(seconds)
+    return if seconds.positive?
+
+    warn "ots: --timeout must be a positive integer (seconds)"
     exit 1
   end
 
