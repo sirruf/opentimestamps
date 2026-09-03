@@ -75,13 +75,44 @@ byte-for-byte, and checks a proof against Bitcoin block 358391 using a recorded
 merkle root, offline. The reference `ots` client also reads proofs this gem
 creates.
 
+## Command line
+
+The gem installs an `ots` executable, a thin wrapper over the library:
+
+```console
+$ ots stamp report.pdf                 # writes report.pdf.ots (pending)
+$ ots upgrade report.pdf.ots           # an hour later: fold in the Bitcoin path
+$ ots verify report.pdf                # checks report.pdf.ots and binds it to the file
+$ ots info report.pdf.ots              # dump the proof's structure
+```
+
+`verify` recomputes the file's hash and confirms it matches the proof, so a
+success means *this* document is anchored, not just that the proof is valid. It
+can also require the proof to be anchored in several distinct Bitcoin blocks
+(`--quorum 2`) and check against your own node (see below).
+
+## Verifying against your own node
+
+`Chain::Explorer` trusts a public explorer. For a check that trusts nothing
+external, point verification at your own Bitcoin Core:
+
+```ruby
+chain = OpenTimestamps::Chain::BitcoinCore.new(
+  "http://127.0.0.1:8332", user: "rpcuser", password: "secret"
+)
+OpenTimestamps.verify(ots, chain: chain, quorum: 2)
+```
+
+`BitcoinCore.from_cookie(path)` reads the node's `.cookie` file instead of a
+password. From the CLI: `ots verify file --node http://127.0.0.1:8332 --cookie ~/.bitcoin/.cookie`.
+
 ## Roadmap
 
 - [x] Byte-exact interop with reference `.ots` vectors, both directions.
 - [x] Multi-calendar submit with merge (a single calendar being down is not fatal).
-- [ ] `Chain::BitcoinCore` JSON-RPC adapter (verification against your own node).
-- [ ] Calendar quorum on upgrade (m-of-n).
-- [ ] Optional CLI (`ots stamp | upgrade | verify | info`).
+- [x] `Chain::BitcoinCore` JSON-RPC adapter (verification against your own node).
+- [x] Quorum (m-of-n distinct Bitcoin blocks), enforced at verify.
+- [x] CLI (`ots stamp | upgrade | verify | info`).
 
 ## License
 

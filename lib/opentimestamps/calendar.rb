@@ -13,8 +13,12 @@ module OpenTimestamps
 
     attr_reader :url
 
-    def initialize(url)
+    # +transport+ is an injection seam for tests and custom clients: a callable
+    # taking (request, timeout) and returning [status_string, body_bytes]. It
+    # defaults to a capped Net::HTTP round-trip.
+    def initialize(url, transport: nil)
       @url = url.to_s.chomp("/")
+      @transport = transport
     end
 
     # Submit a digest; returns a pending Timestamp rooted at that digest.
@@ -44,6 +48,8 @@ module OpenTimestamps
     def host = URI(@url).host
 
     def request(req, timeout)
+      return @transport.call(req, timeout) if @transport
+
       uri = URI(@url)
       req["Accept"] = MIME
       req["User-Agent"] = "opentimestamps-ruby/#{VERSION}"

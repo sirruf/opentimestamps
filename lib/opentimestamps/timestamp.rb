@@ -34,7 +34,10 @@ module OpenTimestamps
 
     def self.read_child(reader, node, tag, depth)
       if tag == 0x00
-        node.attestations << Attestation.deserialize(reader)
+        att = Attestation.deserialize(reader)
+        # The reference client keeps attestations in a set; mirror that so a proof
+        # cannot carry the same attestation twice (which would inflate a quorum).
+        node.attestations << att unless node.attestations.include?(att)
       else
         op = Op.deserialize(reader, tag)
         child_msg = op.apply(node.msg)
@@ -45,17 +48,22 @@ module OpenTimestamps
     end
     private_class_method :read_child
 
+    # Children are written in a canonical order (attestations then ops), each
+    # sorted by the same key the reference client uses: ops by [tag, raw operand],
+    # attestations by [tag, type-specific field] (Bitcoin by height, Pending by
+    # uri). A proof `ots` produced is already in this order, so re-serializing it
+    # is byte-exact; a proof we built or merged is normalized to match `ots`.
     def serialize(writer)
       total = @attestations.size + @ops.size
       raise Error, "timestamp node has no children" if total.zero?
 
       written = 0
-      @attestations.each do |att|
+      @attestations.sort_by(&:sort_key).each do |att|
         writer.u8(0xff) if (written += 1) < total
         writer.u8(0x00)
         att.serialize(writer)
       end
-      @ops.each do |op, child|
+      @ops.sort_by { |op, _| op.sort_key }.each do |op, child|
         writer.u8(0xff) if (written += 1) < total
         op.serialize(writer)
         child.serialize(writer)
@@ -98,13 +106,15 @@ module OpenTimestamps
     end
 
     # Checks every Bitcoin attestation against the chain oracle. Returns one
-    # { height:, time:, verified: } entry per Bitcoin attestation.
+    # { height:, time:, verified:, commitment: } entry per Bitcoin attestation.
+    # The commitment lets a caller collapse several tree paths that prove the same
+    # anchor (same height and root) into one.
     def verify(chain)
       each_attestation.filter_map do |commitment, att|
         next unless att.bitcoin?
 
         root, time = chain.block_merkle_root_and_time(att.height)
-        { height: att.height, time: time, verified: commitment == root }
+        { height: att.height, time: time, verified: commitment == root, commitment: commitment }
       end
     end
   end

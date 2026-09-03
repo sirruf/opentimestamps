@@ -1,0 +1,167 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require "opentimestamps"
+
+# Command-line front end for the opentimestamps gem: stamp a file against the
+# Bitcoin blockchain, upgrade the pending proof once a calendar anchors it, and
+# verify it. Thin wrapper over the library API.
+module OTSCLI
+  module_function
+
+  def main(argv)
+    command = argv.shift
+    case command
+    when "stamp"   then stamp(argv)
+    when "upgrade" then upgrade(argv)
+    when "verify"  then verify(argv)
+    when "info"    then info(argv)
+    when "version", "--version", "-v" then puts "opentimestamps #{OpenTimestamps::VERSION}"
+    when nil, "help", "--help", "-h" then warn(usage) || (exit(command.nil? ? 1 : 0))
+    else
+      warn "ots: unknown command #{command.inspect}\n\n#{usage}"
+      exit 1
+    end
+  rescue OpenTimestamps::Error, OptionParser::ParseError, SystemCallError, IOError, URI::InvalidURIError => e
+    warn "ots: #{e.message}"
+    exit 1
+  rescue Interrupt
+    warn "ots: interrupted"
+    exit 130
+  end
+
+  def usage
+    <<~TXT
+      Usage: ots <command> [options]
+
+      Commands:
+        stamp <file>            Create <file>.ots (submits the file hash to calendars)
+        upgrade <file.ots>      Fold in the Bitcoin path once a calendar has anchored it
+        verify <file>           Check <file>.ots against the chain and bind it to <file>
+        info <file.ots>         Print the structure of a proof
+        version                 Print the library version
+
+      Run "ots <command> --help" for command-specific options.
+    TXT
+  end
+
+  def stamp(argv)
+    opts = { calendars: [], timeout: 20 }
+    OptionParser.new do |p|
+      p.banner = "Usage: ots stamp <file> [options]"
+      p.on("-c", "--calendar URL", "Calendar URL (repeatable; defaults to the public calendars)") { |u| opts[:calendars] << u }
+      p.on("-o", "--out PATH", "Output path (default: <file>.ots)") { |o| opts[:out] = o }
+      p.on("--timeout SECONDS", Integer, "Per-request timeout (default: 20)") { |t| opts[:timeout] = t }
+    end.parse!(argv)
+
+    file = require_arg(argv, "stamp <file>")
+    out = opts[:out] || "#{file}.ots"
+
+    calendars = opts[:calendars].empty? ? OpenTimestamps::DEFAULT_CALENDARS : opts[:calendars]
+    data = File.binread(file)
+    detached = OpenTimestamps.stamp(data, calendars: calendars, timeout: opts[:timeout])
+    write_new(out, detached.serialize)
+    warn "Stamped #{file} -> #{out} (pending; upgrade in an hour or so)"
+  end
+
+  def upgrade(argv)
+    opts = { timeout: 20 }
+    OptionParser.new do |p|
+      p.banner = "Usage: ots upgrade <file.ots> [options]"
+      p.on("--timeout SECONDS", Integer, "Per-request timeout (default: 20)") { |t| opts[:timeout] = t }
+    end.parse!(argv)
+
+    path = require_arg(argv, "upgrade <file.ots>")
+    detached = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread(path))
+    if OpenTimestamps.upgrade(detached, timeout: opts[:timeout])
+      write_atomic(path, detached.serialize)
+      warn "Upgraded #{path} (now carries a Bitcoin attestation)"
+    else
+      warn "No change: #{path} is already anchored, or no calendar has anchored it yet."
+    end
+  end
+
+  def verify(argv)
+    opts = { quorum: 1 }
+    OptionParser.new do |p|
+      p.banner = "Usage: ots verify <file> [options]"
+      p.on("-o", "--ots PATH", "Proof path (default: <file>.ots)") { |o| opts[:ots] = o }
+      p.on("--quorum N", Integer, "Require N independent Bitcoin anchors (default: 1)") { |n| opts[:quorum] = n }
+      p.on("--node URL", "Verify against your Bitcoin Core node instead of a public explorer") { |u| opts[:node] = u }
+      p.on("--rpcuser USER", "Bitcoin Core RPC user") { |u| opts[:user] = u }
+      p.on("--rpcpassword PASS", "Bitcoin Core RPC password") { |v| opts[:password] = v }
+      p.on("--cookie PATH", "Bitcoin Core .cookie file for RPC auth") { |c| opts[:cookie] = c }
+    end.parse!(argv)
+
+    file = require_arg(argv, "verify <file>")
+    ots_path = opts[:ots] || "#{file}.ots"
+    detached = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread(ots_path))
+
+    # Bind the proof to the document first: it is cheap and needs no network, so a
+    # mismatch fails fast before any chain lookup.
+    unless bound_to_file?(detached, file)
+      warn "ots: #{ots_path} is a valid proof but does NOT match #{file}"
+      exit 1
+    end
+
+    chain = chain_for(opts)
+    results = OpenTimestamps.verify(detached, chain: chain, quorum: opts[:quorum])
+    results.each { |r| puts "OK: #{file} anchored in Bitcoin block ##{r.height} at #{r.time.iso8601}" }
+  end
+
+  def info(argv)
+    OptionParser.new { |p| p.banner = "Usage: ots info <file.ots>" }.parse!(argv)
+    path = require_arg(argv, "info <file.ots>")
+    detached = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread(path))
+    puts OpenTimestamps.info(detached)
+  end
+
+  # --- helpers ---
+
+  def chain_for(opts)
+    return OpenTimestamps::Chain::Explorer.new unless opts[:node]
+
+    if opts[:cookie]
+      OpenTimestamps::Chain::BitcoinCore.from_cookie(opts[:cookie], opts[:node])
+    else
+      OpenTimestamps::Chain::BitcoinCore.new(opts[:node], user: opts[:user], password: opts[:password])
+    end
+  end
+
+  # Recompute the file's hash with the proof's file-hash op and compare it to the
+  # digest the proof commits to; this is what binds a proof to a document.
+  def bound_to_file?(detached, file)
+    recomputed = OpenTimestamps.digest_for_kind(File.binread(file), detached.file_hash_op.kind)
+    recomputed == detached.file_digest
+  end
+
+  def require_arg(argv, shape)
+    arg = argv.shift
+    return arg if arg
+
+    warn "ots: missing argument\nUsage: ots #{shape}"
+    exit 1
+  end
+
+  # Create a new file, refusing to clobber an existing one. O_EXCL makes the
+  # check-and-create atomic (no TOCTOU window).
+  def write_new(path, bytes)
+    File.open(path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY) { |f| f.write(bytes) }
+  rescue Errno::EEXIST
+    warn "ots: #{path} already exists; refusing to overwrite"
+    exit 1
+  end
+
+  # Replace an existing file atomically: write a sibling temp file, then rename it
+  # over the target, so a crash mid-write cannot destroy the only copy of a proof.
+  def write_atomic(path, bytes)
+    tmp = "#{path}.tmp.#{Process.pid}"
+    File.binwrite(tmp, bytes)
+    File.rename(tmp, path)
+  ensure
+    File.unlink(tmp) if tmp && File.exist?(tmp)
+  end
+end
+
+OTSCLI.main(ARGV)

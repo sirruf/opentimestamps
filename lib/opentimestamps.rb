@@ -28,6 +28,10 @@ module OpenTimestamps
   # One confirmed Bitcoin attestation: the block that anchors +digest+, and when.
   Verification = Struct.new(:height, :time, :digest, keyword_init: true)
 
+  # Builds a Calendar from a URL. Overridable in stamp_digest / upgrade as an
+  # injection seam for tests and custom transports.
+  DEFAULT_CALENDAR_FACTORY = ->(url) { Calendar.new(url) }
+
   module_function
 
   # Stamp raw data: hash it, then stamp the digest.
@@ -38,13 +42,14 @@ module OpenTimestamps
   # Stamp an already-computed digest. The content itself never leaves the caller
   # (privacy / "sealed" mode). The digest is submitted to every calendar and the
   # replies are merged, so a single calendar being down is not fatal.
-  def stamp_digest(digest, calendars: DEFAULT_CALENDARS, hash: :sha256, timeout: 20)
+  def stamp_digest(digest, calendars: DEFAULT_CALENDARS, hash: :sha256, timeout: 20,
+                   calendar_factory: DEFAULT_CALENDAR_FACTORY)
     DetachedTimestampFile.from_hash(digest, hash: hash) # validate digest length before any network
 
     merged = nil
     failures = []
     Array(calendars).each do |url|
-      timestamp = Calendar.new(url).submit(digest, timeout: timeout)
+      timestamp = calendar_factory.call(url).submit(digest, timeout: timeout)
       merged ? merged.merge(timestamp) : merged = timestamp
     rescue NetworkError => e
       failures << e.message
@@ -57,38 +62,59 @@ module OpenTimestamps
   # Ask each pending calendar to upgrade to its Bitcoin path, folding the result
   # in. Returns true if anything changed; persist the file afterwards. A calendar
   # that is unreachable is skipped, not fatal.
-  def upgrade(detached, timeout: 20)
-    return false if detached.timestamp.each_attestation.any? { |_, att| att.bitcoin? }
+  def upgrade(detached, timeout: 20, calendar_factory: DEFAULT_CALENDAR_FACTORY)
+    before = detached.serialize
 
-    changed = false
     detached.timestamp.each_attestation.select { |_, att| att.pending? }.each do |commitment, att|
+      node = detached.timestamp.find(commitment)
+      # Skip a calendar whose commitment is already anchored at this leaf, but keep
+      # going for the others: with two calendars, one may anchor days before the
+      # other, and a later upgrade must still fold the second one in (so quorum > 1
+      # can eventually be met).
+      next if node&.attestations&.any?(&:bitcoin?)
+
       upgraded = begin
-        Calendar.new(att.uri).upgrade(commitment, timeout: timeout)
+        calendar_factory.call(att.uri).upgrade(commitment, timeout: timeout)
       rescue NetworkError
         nil
       end
-      next unless upgraded
-
-      detached.timestamp.find(commitment)&.merge(upgraded)
-      changed = true
+      node&.merge(upgraded) if upgraded
     end
-    changed
+
+    detached.serialize != before
   end
 
-  # Verify against the chain, failing closed: raises VerificationError unless at
-  # least one Bitcoin attestation matches its block. Returns the confirmed
-  # attestations, each carrying the proven digest to compare with your document.
-  def verify(detached, chain: Chain::Explorer.new)
+  # Verify against the chain, failing closed: raises VerificationError unless the
+  # proof is anchored in at least +quorum+ distinct Bitcoin blocks. Returns one
+  # confirmed attestation per distinct block, each carrying the proven digest to
+  # compare with your document.
+  #
+  # +quorum+ counts distinct block heights, not raw attestations: several tree
+  # paths that prove the same anchor collapse to one, so a single anchor (however
+  # a calendar dresses it up) can never satisfy quorum > 1. Requiring quorum > 1
+  # therefore means the document is provably in that many separate blocks.
+  def verify(detached, chain: Chain::Explorer.new, quorum: 1)
+    raise Error, "quorum must be a positive integer" unless quorum.is_a?(Integer) && quorum >= 1
+
     digest = detached.file_digest
-    confirmed = detached.timestamp.verify(chain).select { |result| result[:verified] }
-    raise VerificationError, "not anchored in Bitcoin (still pending, or the proof does not match)" if confirmed.empty?
+    confirmed = detached.timestamp.verify(chain)
+                        .select { |result| result[:verified] }
+                        .uniq { |result| [result[:height], result[:commitment]] }
+    heights = confirmed.map { |result| result[:height] }.uniq
+    if heights.size < quorum
+      raise VerificationError,
+            "not anchored in #{quorum} distinct Bitcoin block(s) " \
+            "(confirmed #{heights.size}; still pending, or the proof does not match)"
+    end
 
     confirmed.map { |result| Verification.new(height: result[:height], time: result[:time], digest: digest) }
   end
 
-  # Boolean form of verify that never raises.
-  def verified?(detached, chain: Chain::Explorer.new)
-    !verify(detached, chain: chain).empty?
+  # Boolean form of verify: returns false instead of raising when a proof does
+  # not verify. A misused +quorum+ (Error) or an unreachable chain (NetworkError)
+  # still propagates, since those are not verification outcomes.
+  def verified?(detached, chain: Chain::Explorer.new, quorum: 1)
+    !verify(detached, chain: chain, quorum: quorum).empty?
   rescue VerificationError
     false
   end
@@ -110,4 +136,13 @@ module OpenTimestamps
     end
   end
   private_class_method :digest_for
+
+  # Hash +data+ with a given file-hash op kind (:sha1, :ripemd160, :sha256), used
+  # to bind a proof to a document. Unlike digest_for, this covers every op a
+  # `.ots` file can carry as its file hash.
+  def digest_for_kind(data, kind)
+    raise Error, "#{kind.inspect} is not a valid file-hash op" unless DetachedTimestampFile::HASH_OPS.key?(kind)
+
+    Op.new(kind).apply(data)
+  end
 end
