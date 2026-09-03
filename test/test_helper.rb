@@ -6,8 +6,28 @@ require "opentimestamps"
 # A deterministic, offline chain oracle for tests: maps a height to a fixed
 # root and time, so verification runs with no network.
 class FakeChain
+  attr_reader :map
+
   def initialize(map) = @map = map # height => [root_bytes, Time]
   def block_merkle_root_and_time(height)
+    @map.fetch(height) { raise OpenTimestamps::Error, "no block #{height}" }
+  end
+end
+
+# Like FakeChain, but models an oracle that is down for the heights in +failing+
+# (NetworkError) and that reports the heights in +missing+ as nonexistent blocks
+# (BlockNotFound).
+class FlakyChain
+  def initialize(map, failing: [], missing: [])
+    @map = map
+    @failing = failing
+    @missing = missing
+  end
+
+  def block_merkle_root_and_time(height)
+    raise OpenTimestamps::NetworkError, "unreachable for #{height}" if @failing.include?(height)
+    raise OpenTimestamps::BlockNotFound, "no such block #{height}" if @missing.include?(height)
+
     @map.fetch(height) { raise OpenTimestamps::Error, "no block #{height}" }
   end
 end

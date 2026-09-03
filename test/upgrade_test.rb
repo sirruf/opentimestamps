@@ -54,6 +54,48 @@ class UpgradeTest < Minitest::Test
     assert_raises(OpenTimestamps::Error) { OpenTimestamps.verify(detached, chain: chain, quorum: 0) }
   end
 
+  # --- oracle resilience ---
+
+  def test_verify_succeeds_when_reachable_anchors_meet_quorum
+    detached, chain = bitcoin_proof(2) # heights 800_000, 800_001
+    flaky = FlakyChain.new(chain.map, failing: [800_001])
+    # One block is unreachable, but the other confirms and quorum 1 is met.
+    assert_equal 1, OpenTimestamps.verify(detached, chain: flaky, quorum: 1).size
+  end
+
+  def test_verify_raises_network_error_not_verification_error_on_outage
+    detached, chain = bitcoin_proof(1) # height 800_000
+    flaky = FlakyChain.new(chain.map, failing: [800_000])
+    # The single anchor's block is unreachable: this is an outage, not a bad proof.
+    assert_raises(OpenTimestamps::NetworkError) { OpenTimestamps.verify(detached, chain: flaky, quorum: 1) }
+  end
+
+  def test_verify_reports_outage_when_quorum_unreachable
+    detached, chain = bitcoin_proof(2)
+    flaky = FlakyChain.new(chain.map, failing: [800_001])
+    # Only one of two blocks is reachable, so quorum 2 cannot be confirmed; the
+    # cause is the outage, so NetworkError (not VerificationError).
+    err = assert_raises(OpenTimestamps::NetworkError) { OpenTimestamps.verify(detached, chain: flaky, quorum: 2) }
+    refute_nil err.cause, "the underlying oracle error must be preserved as the cause"
+  end
+
+  def test_verify_treats_nonexistent_block_as_not_anchored
+    detached, chain = bitcoin_proof(1) # height 800_000
+    # A bogus/nonexistent block is a verification failure, never an outage, so
+    # verified? can actually return false instead of looping on NetworkError.
+    flaky = FlakyChain.new(chain.map, missing: [800_000])
+    assert_raises(OpenTimestamps::VerificationError) { OpenTimestamps.verify(detached, chain: flaky, quorum: 1) }
+    refute OpenTimestamps.verified?(detached, chain: flaky, quorum: 1)
+  end
+
+  def test_unreachable_quorum_is_verification_error_not_outage
+    detached, chain = bitcoin_proof(1) # only one distinct block exists in the proof
+    flaky = FlakyChain.new(chain.map, failing: [800_000])
+    # Even if the one block came back it could satisfy at most quorum 1, so quorum 2
+    # is impossible for this proof regardless of the outage: a VerificationError.
+    assert_raises(OpenTimestamps::VerificationError) { OpenTimestamps.verify(detached, chain: flaky, quorum: 2) }
+  end
+
   def test_upgrade_then_quorum_across_two_calendars
     detached, factory, chain = pending_proof([["cal-a", :ok], ["cal-b", :ok]])
     OpenTimestamps.upgrade(detached, calendar_factory: factory)

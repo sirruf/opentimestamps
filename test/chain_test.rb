@@ -53,14 +53,43 @@ class ChainTest < Minitest::Test
   end
 
   def test_bitcoincore_surfaces_rpc_error
-    transport = ->(_body) { JSON.generate("result" => nil, "error" => { "code" => -8, "message" => "out of range" }) }
+    # A generic RPC error (not a block-not-found code) is a NetworkError.
+    transport = ->(_body) { JSON.generate("result" => nil, "error" => { "code" => -1, "message" => "misc failure" }) }
     err = assert_raises(NetworkError) { Chain::BitcoinCore.new(transport: transport).block_merkle_root_and_time(1) }
-    assert_match(/out of range/, err.message)
+    assert_match(/misc failure/, err.message)
   end
 
   def test_bitcoincore_wraps_non_json_as_network_error
     transport = ->(_body) { "<html>502</html>" }
     assert_raises(NetworkError) { Chain::BitcoinCore.new(transport: transport).block_merkle_root_and_time(1) }
+  end
+
+  def test_bitcoincore_raises_block_not_found_on_out_of_range
+    transport = ->(_body) { JSON.generate("result" => nil, "error" => { "code" => -8, "message" => "Block height out of range" }) }
+    assert_raises(OpenTimestamps::BlockNotFound) { Chain::BitcoinCore.new(transport: transport).block_merkle_root_and_time(10**9) }
+  end
+
+  def test_bitcoincore_rejects_response_with_mismatched_id
+    # A response echoing an id other than the one we sent (the id is random per call).
+    transport = ->(_body) { JSON.generate("result" => "abc", "error" => nil, "id" => "someone-elses-id") }
+    err = assert_raises(NetworkError) { Chain::BitcoinCore.new(transport: transport).block_merkle_root_and_time(1) }
+    assert_match(/id mismatch/, err.message)
+  end
+
+  def test_bitcoincore_surfaces_error_even_when_id_is_null
+    # bitcoind returns id: null with request-level errors; the error message must
+    # win over the id check.
+    transport = ->(_body) { JSON.generate("result" => nil, "error" => { "code" => -32_700, "message" => "Parse error" }, "id" => nil) }
+    err = assert_raises(NetworkError) { Chain::BitcoinCore.new(transport: transport).block_merkle_root_and_time(1) }
+    assert_match(/Parse error/, err.message)
+  end
+
+  def test_explorer_raises_block_not_found_on_404
+    # The real Explorer maps 404 to BlockNotFound before block_merkle_root_and_time
+    # rewraps anything; here we exercise that mapping through a stub subclass.
+    explorer = Chain::Explorer.new
+    def explorer.get(_url) = raise(OpenTimestamps::BlockNotFound, "explorer: block not found (HTTP 404)")
+    assert_raises(OpenTimestamps::BlockNotFound) { explorer.block_merkle_root_and_time(10**9) }
   end
 
   def test_bitcoincore_decodes_url_credentials_per_rfc3986

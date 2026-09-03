@@ -96,4 +96,36 @@ class CliTest < Minitest::Test
     assert_match(/ots:/, err)
     refute_match(/\.rb:\d+:in/, err)
   end
+
+  def test_extra_arguments_rejected
+    _out, err, status = ots("info", VECTOR, "extra-arg")
+    refute status.success?
+    assert_match(/unexpected argument/, err)
+  end
+
+  def test_non_positive_timeout_rejected
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "doc.txt")
+      File.write(file, "hi")
+      _out, err, status = ots("stamp", file, "--timeout", "0")
+      refute status.success?
+      assert_match(/timeout must be a positive/, err)
+    end
+  end
+
+  def test_negative_timeout_rejected
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "doc.txt")
+      File.write(file, "hi")
+      _out, err, status = ots("stamp", file, "--timeout=-5")
+      refute status.success?
+      assert_match(/timeout must be a positive/, err)
+    end
+  end
+
+  def test_upgrade_rejects_extra_arguments
+    _out, err, status = ots("upgrade", VECTOR, "extra-arg")
+    refute status.success?
+    assert_match(/unexpected argument/, err)
+  end
 end
