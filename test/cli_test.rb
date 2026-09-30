@@ -70,6 +70,44 @@ class CliTest < Minitest::Test
     end
   end
 
+  def test_verify_accepts_the_proof_path_like_the_reference_client
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "other.txt")
+      File.write(file, "not the stamped content")
+      File.binwrite("#{file}.ots", File.binread(VECTOR))
+      _out, err, status = ots("verify", "#{file}.ots")
+      refute status.success?
+      assert_match(/assuming target file is #{Regexp.escape(file)}/, err)
+      assert_match(/#{Regexp.escape(file)}\.ots is a valid proof but does NOT match #{Regexp.escape(file)}/, err)
+    end
+  end
+
+  def test_verify_proof_path_with_explicit_target_file
+    Dir.mktmpdir do |dir|
+      proof = File.join(dir, "proof.ots")
+      target = File.join(dir, "doc.txt")
+      File.binwrite(proof, File.binread(VECTOR))
+      File.write(target, "not the stamped content")
+      _out, err, status = ots("verify", proof, "--file", target)
+      refute status.success?
+      refute_match(/assuming target/, err)
+      assert_match(/does NOT match #{Regexp.escape(target)}/, err)
+    end
+  end
+
+  def test_verify_document_ending_in_ots_is_still_a_document
+    # A stamped file that itself ends in .ots keeps working when its own proof exists.
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "old.ots")
+      File.write(file, "not the stamped content")
+      File.binwrite("#{file}.ots", File.binread(VECTOR))
+      _out, err, status = ots("verify", file)
+      refute status.success?
+      refute_match(/assuming target/, err)
+      assert_match(/#{Regexp.escape(file)}\.ots is a valid proof but does NOT match/, err)
+    end
+  end
+
   # Every expected failure must be a clean one-line "ots:" message, never a raw
   # Ruby backtrace.
   def test_missing_file_is_a_clean_error
