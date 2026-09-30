@@ -5,6 +5,16 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0]
+
+### Added
+
+- `ots verify` accepts the proof path, like the reference Python client:
+  `ots verify report.pdf.ots` binds the proof to `report.pdf` (announced on
+  stderr). `--file PATH` names a different target document. Passing the document
+  (`ots verify report.pdf`) works as before, including for a document whose own
+  name ends in `.ots` when its `<file>.ots` proof exists.
+
 ## [0.3.0]
 
 ### Added
@@ -103,7 +113,8 @@ caps; only `DeserializationError` on malformed bytes). Tested with byte-exact
 round-trips of twelve reference vectors, an offline check against Bitcoin block
 358391, and Keccak-256 known-answer vectors.
 
-[Unreleased]: https://github.com/sirruf/opentimestamps/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sirruf/opentimestamps/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sirruf/opentimestamps/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sirruf/opentimestamps/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sirruf/opentimestamps/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sirruf/opentimestamps/releases/tag/v0.1.0

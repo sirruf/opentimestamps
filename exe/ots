@@ -38,7 +38,7 @@ module OTSCLI
       Commands:
         stamp <file>            Create <file>.ots (submits the file hash to calendars)
         upgrade <file.ots>      Fold in the Bitcoin path once a calendar has anchored it
-        verify <file>           Check <file>.ots against the chain and bind it to <file>
+        verify <file | file.ots> Check the proof against the chain and bind it to the file
         info <file.ots>         Print the structure of a proof
         version                 Print the library version
 
@@ -90,8 +90,9 @@ module OTSCLI
   def verify(argv)
     opts = { quorum: 1 }
     OptionParser.new do |p|
-      p.banner = "Usage: ots verify <file> [options]"
+      p.banner = "Usage: ots verify <file | file.ots> [options]"
       p.on("-o", "--ots PATH", "Proof path (default: <file>.ots)") { |o| opts[:ots] = o }
+      p.on("-f", "--file PATH", "Document to bind the proof to (when passing a .ots)") { |f| opts[:file] = f }
       p.on("--quorum N", Integer, "Require N independent Bitcoin anchors (default: 1)") { |n| opts[:quorum] = n }
       p.on("--node URL", "Verify against your Bitcoin Core node instead of a public explorer") { |u| opts[:node] = u }
       p.on("--rpcuser USER", "Bitcoin Core RPC user") { |u| opts[:user] = u }
@@ -99,9 +100,8 @@ module OTSCLI
       p.on("--cookie PATH", "Bitcoin Core .cookie file for RPC auth") { |c| opts[:cookie] = c }
     end.parse!(argv)
 
-    file = require_arg(argv, "verify <file>")
+    file, ots_path = verify_paths(require_arg(argv, "verify <file | file.ots>"), opts)
     no_extra(argv)
-    ots_path = opts[:ots] || "#{file}.ots"
     detached = OpenTimestamps::DetachedTimestampFile.deserialize(File.binread(ots_path))
 
     # Bind the proof to the document first: it is cheap and needs no network, so a
@@ -134,6 +134,20 @@ module OTSCLI
     else
       OpenTimestamps::Chain::BitcoinCore.new(opts[:node], user: opts[:user], password: opts[:password])
     end
+  end
+
+  # Resolve (document, proof) from the positional argument. Like the reference
+  # client, a path ending in .ots names the proof and the document is the same
+  # path without the suffix (or --file). Anything else names the document, whose
+  # proof is <file>.ots (or --ots). A document that itself ends in .ots is still
+  # handled as a document when its own <file>.ots proof exists.
+  def verify_paths(arg, opts)
+    proof_given = arg.end_with?(".ots") && !opts[:ots] && !File.exist?("#{arg}.ots")
+    return [arg, opts[:ots] || "#{arg}.ots"] unless proof_given
+
+    file = opts[:file] || arg.delete_suffix(".ots")
+    warn "ots: assuming target file is #{file}" unless opts[:file]
+    [file, arg]
   end
 
   # Recompute the file's hash with the proof's file-hash op and compare it to the

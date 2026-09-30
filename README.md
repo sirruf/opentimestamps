@@ -83,6 +83,7 @@ The gem installs an `ots` executable, a thin wrapper over the library:
 $ ots stamp report.pdf                 # writes report.pdf.ots (pending)
 $ ots upgrade report.pdf.ots           # an hour later: fold in the Bitcoin path
 $ ots verify report.pdf                # checks report.pdf.ots and binds it to the file
+$ ots verify report.pdf.ots            # same, reference-client style (proof path)
 $ ots info report.pdf.ots              # dump the proof's structure
 ```
 
